@@ -1,7 +1,5 @@
-import { Payload, Node, Edge, NodeType } from './payload';
+import { Payload, NodeType } from './payload';
 import { z } from 'zod';
-import { SAMPLE_LLM_OUTPUT } from './prompts/sample';
-
 // Define a schema for validation
 const NodeSchema = z.object({
     id: z.string(),

@@ -1,6 +1,3 @@
-import { HumanMessage } from '@langchain/core/messages';
-import { MessagesPlaceholder } from '@langchain/core/prompts';
-import { ChatPromptTemplate } from '@langchain/core/prompts';
 import express from 'express';
 import { processLLMOutput } from './graph/parser';
 import { v4 as uuidv4 } from 'uuid';
@@ -19,8 +16,7 @@ app.use(express.json());
 const activeWorkflows: { [id: string]: any } = {};
 const conversations: { [id: string]: any[] } = {};
 
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
-const mongodb = new MongoClient(process.env.MONGODB_URI || '', {
+const mongodb = new MongoClient(process.env.MONGODB_URI || " ", {
     serverApi: {
         version: ServerApiVersion.v1,
         strict: true,
@@ -32,9 +28,11 @@ const mongodb = new MongoClient(process.env.MONGODB_URI || '', {
 let db: any;
 async function connectToMongoDB() {
     try {
-        await mongodb.connect();
+        const client = await mongodb.connect();
+        db = client.db("Sakha");
         console.log("Connected to MongoDB");
-        db = mongodb.db('workflows'); // Replace 'workflows' with your database name
+        await mongodb.db("admin").command({ ping: 1 });
+        console.log("Pinged your deployment. You successfully connected to MongoDB!");
     } catch (error) {
         console.error("Failed to connect to MongoDB", error);
         process.exit(1);
@@ -72,7 +70,14 @@ app.post('/create', async (req, res) => {
         })
         const workflowId = uuidv4();
         // Save payload to MongoDB
-        await db.collection('workflows').insertOne({ workflowId, payload, createdAt: new Date() });
+
+        if (db) {
+            const authColl = db.collection("auth");
+            await authColl.insertOne({ workflowId, payload });
+        } else {
+            console.error('Database not connected');
+        }
+
         res.json({ workflowId, payload });
     } catch (error) {
         console.error('Error in create endpoint:', error);
