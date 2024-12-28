@@ -1,10 +1,10 @@
 import { z } from "zod";
 import { GraphSchema } from "./types";
 import { END, START } from "@langchain/langgraph";
-import { ToolNodeConfig } from "./types";
+import { ToolConfig } from "./types";
 
 // Refund Tools
-export const refundTool: ToolNodeConfig = {
+export const refundTool: ToolConfig = {
     function: "process_refund",
     description: "Process a refund for a customer order",
     schema: z.object({
@@ -25,7 +25,7 @@ export const refundTool: ToolNodeConfig = {
     }
 };
 
-export const cancelOrderTool: ToolNodeConfig = {
+export const cancelOrderTool: ToolConfig = {
     function: "cancel_order",
     description: "Cancel an existing order",
     schema: z.object({
@@ -46,7 +46,7 @@ export const cancelOrderTool: ToolNodeConfig = {
 };
 
 // Tech Support Tools
-export const diagnoseTool: ToolNodeConfig = {
+export const diagnoseTool: ToolConfig = {
     function: "diagnose_device",
     description: "Run diagnostics on a device",
     schema: z.object({
@@ -72,7 +72,7 @@ export const diagnoseTool: ToolNodeConfig = {
     }
 };
 
-export const escalateTool: ToolNodeConfig = {
+export const escalateTool: ToolConfig = {
     function: "escalate_ticket",
     description: "Escalate issue to senior support",
     schema: z.object({
@@ -95,7 +95,7 @@ export const escalateTool: ToolNodeConfig = {
 };
 
 // Invoice Tools
-export const generateInvoiceTool: ToolNodeConfig = {
+export const generateInvoiceTool: ToolConfig = {
     function: "generate_invoice",
     description: "Generate a new invoice",
     schema: z.object({
@@ -123,7 +123,7 @@ export const generateInvoiceTool: ToolNodeConfig = {
     }
 };
 
-export const retrieveInvoiceTool: ToolNodeConfig = {
+export const retrieveInvoiceTool: ToolConfig = {
     function: "retrieve_invoice",
     description: "Retrieve an existing invoice",
     schema: z.object({
@@ -160,7 +160,6 @@ export const complexSchema: GraphSchema = {
                     For refunds -> respond EXACTLY with "REFUND"
                     For invoices -> respond EXACTLY with "INVOICE"
                     For technical issues -> respond EXACTLY with "TECH"
-                    For order status -> respond EXACTLY with "ORDER"
                     
                     if it is a general question repond directly.
                     ONLY respond with one of these exact words, nothing else.`,
@@ -170,26 +169,16 @@ export const complexSchema: GraphSchema = {
             id: "refund_agent",
             type: 'agent',
             config: {
-                systemPrompt: `You are a refund specialist.
-                    For refunds you need: orderId, amount, and reason.
-                    
-                    If customer wants to cancel order, use cancel_order function.
-                    If customer wants a refund, use process_refund function.
-                    
-                    Ask for any missing information.
-                    Only use functions when you have ALL required information.`,
+                systemPrompt: `You are a billing specialist. You can help with refunds and order cancellations.
+            Available functions:
+            - cancel_order: Use to cancel an order (requires orderId and reason)
+            - process_refund: Use for refunds (requires orderId, amount, and reason)
+            
+            DO NOT describe function calls in text. Instead, USE the provided functions directly.
+            Ask for any missing information before using functions.
+            Only use functions when you have ALL required information.`,
                 functions: [refundTool, cancelOrderTool]
             }
-        },
-        {
-            id: "refund_tools",
-            type: 'tool',
-            config: refundTool
-        },
-        {
-            id: "cancel_tools",
-            type: 'tool',
-            config: cancelOrderTool
         },
         {
             id: "tech_agent",
@@ -204,16 +193,6 @@ export const complexSchema: GraphSchema = {
             }
         },
         {
-            id: "tech_tools",
-            type: 'tool',
-            config: diagnoseTool
-        },
-        {
-            id: "escalation_tools",
-            type: 'tool',
-            config: escalateTool
-        },
-        {
             id: "invoice_agent",
             type: 'agent',
             config: {
@@ -225,16 +204,7 @@ export const complexSchema: GraphSchema = {
                 functions: [generateInvoiceTool, retrieveInvoiceTool]
             }
         },
-        {
-            id: "invoice_gen_tools",
-            type: 'tool',
-            config: generateInvoiceTool
-        },
-        {
-            id: "invoice_get_tools",
-            type: 'tool',
-            config: retrieveInvoiceTool
-        }
+
     ],
     edges: [
         { source: START, target: "alpha" },
@@ -243,9 +213,9 @@ export const complexSchema: GraphSchema = {
             condition: {
                 type: "router",
                 config: {
-                    "REFUND": "refund_agent",
-                    "TECH": "tech_agent",
-                    "INVOICE": "invoice_agent",
+                    "refund": "refund_agent",
+                    "invoice": "invoice_agent",
+                    "tech": "tech_agent",
                     "end": END
                 }
             },
@@ -257,46 +227,39 @@ export const complexSchema: GraphSchema = {
             condition: {
                 type: "router",
                 config: {
-                    "process_refund": "refund_tools",
-                    "cancel_order": "cancel_tools",
+                    "tool_node": "tool_node",
                     "end": END
                 }
             },
             target: ""
         },
-        { source: "refund_tools", target: "refund_agent" },
-        { source: "cancel_tools", target: "refund_agent" },
-
         // Tech agent edges
         {
             source: "tech_agent",
             condition: {
                 type: "router",
                 config: {
-                    "diagnose_device": "tech_tools",
-                    "escalate_ticket": "escalation_tools",
+                    "tool_node": "tool_node",
                     "end": END
                 }
             },
             target: ""
         },
-        { source: "tech_tools", target: "tech_agent" },
-        { source: "escalation_tools", target: "tech_agent" },
-
         // Invoice agent edges
         {
             source: "invoice_agent",
             condition: {
                 type: "router",
                 config: {
-                    "generate_invoice": "invoice_gen_tools",
-                    "retrieve_invoice": "invoice_get_tools",
+                    "tool_node": "tool_node",
                     "end": END
                 }
             },
             target: ""
         },
-        { source: "invoice_gen_tools", target: "invoice_agent" },
-        { source: "invoice_get_tools", target: "invoice_agent" }
+        {
+            source: 'tool_node',
+            target: END,
+        }
     ]
 };

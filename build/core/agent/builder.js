@@ -62,16 +62,19 @@ class GraphBuilder {
     }
     async buildGraph(schema) {
         const graph = new langgraph_1.StateGraph(this.StateSchema);
+        let allTools = [];
         for (const node of schema.nodes) {
             if (node.type === 'agent') {
                 const agentNode = await this.buildAgentNode(node.id, node.config);
                 graph.addNode(node.id, agentNode);
-            }
-            else if (node.type === 'tool') {
-                const toolNode = await this.buildToolNode(node.config);
-                graph.addNode(node.id, toolNode);
+                if (node.config.functions) {
+                    allTools.push(...node.config.functions);
+                }
             }
         }
+        let tools = this.buildTools(allTools);
+        let toolNode = new prebuilt_1.ToolNode(tools);
+        graph.addNode("tool_node", toolNode);
         console.log("[DEBUG] Nodes in the graph:");
         for (const node of schema.nodes) {
             console.log(`[DEBUG] Node ID: ${node.id}, Type: ${node.type}`);
@@ -110,10 +113,11 @@ class GraphBuilder {
             // Bind functions if available
             if (tools === null || tools === void 0 ? void 0 : tools.length) {
                 const functions = tools.map(tool => (0, function_calling_1.convertToOpenAIFunction)(tool));
-                nodeModel.bind({ functions });
+                console.log(`[DEBUG] Binding functions to ${id}:`, functions.map(f => f.name));
+                nodeModel.bind({ functions }); // Force function calling
             }
             const prompt = prompts_1.ChatPromptTemplate.fromMessages([
-                ["system", config.systemPrompt],
+                ["system", config.systemPrompt + "\n\nWhen you need to execute an action, USE THE PROVIDED FUNCTIONS."],
                 new prompts_2.MessagesPlaceholder("messages"),
             ]);
             const response = await prompt.pipe(nodeModel).invoke({
@@ -123,14 +127,16 @@ class GraphBuilder {
                 content: response.content,
                 function_call: (_a = response.additional_kwargs) === null || _a === void 0 ? void 0 : _a.function_call
             });
-            // If there's a function call, return with tool call info
+            // Check for function calls
             if ((_b = response.additional_kwargs) === null || _b === void 0 ? void 0 : _b.function_call) {
+                const functionCall = response.additional_kwargs.function_call;
+                console.log(`[DEBUG] Function call detected:`, functionCall);
                 return {
                     messages: [response],
                     currentNode: id,
                     toolCalls: [{
-                            tool: response.additional_kwargs.function_call.name,
-                            args: JSON.parse(response.additional_kwargs.function_call.arguments)
+                            tool: functionCall.name,
+                            args: JSON.parse(functionCall.arguments)
                         }]
                 };
             }
@@ -139,21 +145,6 @@ class GraphBuilder {
                 currentNode: id
             };
         };
-    }
-    async buildToolNode(config) {
-        const tool = new tools_1.DynamicStructuredTool({
-            name: config.function,
-            description: config.description,
-            schema: config.schema,
-            func: async (input) => {
-                const result = await config.handler(input);
-                if (!result.success) {
-                    throw new Error(result.error || 'Tool execution failed');
-                }
-                return JSON.stringify(result.data);
-            }
-        });
-        return new prebuilt_1.ToolNode([tool]);
     }
     buildTools(tools) {
         return tools.map(toolConfig => {
@@ -184,7 +175,7 @@ class GraphBuilder {
             if ((_a = lastMessage.additional_kwargs) === null || _a === void 0 ? void 0 : _a.function_call) {
                 const functionName = lastMessage.additional_kwargs.function_call.name;
                 console.log('[DEBUG] Found function call:', functionName);
-                return functionName in condition.config ? condition.config[functionName] : "__end__";
+                return 'tool_node';
             }
             // Handle routing commands
             if (lastMessage._getType() === 'ai') {
@@ -194,11 +185,11 @@ class GraphBuilder {
                 for (const [key, value] of Object.entries(condition.config)) {
                     if (content === key.toLowerCase()) {
                         console.log(`[DEBUG] Found route: ${key} -> ${value}`);
-                        return value; // Return the value, not the key
+                        return key; // Return the value, not the key
                     }
                 }
             }
-            return "__end__"; // Match exact string in config
+            return "end";
         };
     }
     // Session management methods
@@ -253,8 +244,8 @@ class GraphBuilder {
             console.debug("[DEBUG] Current State Values:", currentState);
             const result = await agent.graph.invoke({
                 messages: [...((currentState === null || currentState === void 0 ? void 0 : currentState.messages) || []), new messages_1.HumanMessage(message)],
-                // currentNode: currentState?.currentNode || 'alpha',
-                // toolCalls: currentState?.toolCalls || []
+                currentNode: (currentState === null || currentState === void 0 ? void 0 : currentState.currentNode) || 'alpha',
+                toolCalls: (currentState === null || currentState === void 0 ? void 0 : currentState.toolCalls) || []
             }, config // Pass the same config here
             );
             // Update session state

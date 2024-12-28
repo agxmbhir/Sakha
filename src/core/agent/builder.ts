@@ -9,11 +9,14 @@ import { Annotation, } from "@langchain/langgraph";
 import { ToolNode } from "@langchain/langgraph/prebuilt";
 import { convertToOpenAIFunction } from "@langchain/core/utils/function_calling";
 import {
-    GraphEdge, GraphNode, AgentNodeConfig, ToolNodeConfig,
+    GraphEdge, GraphNode, AgentNodeConfig,
     ChatModelConfig, CompiledAgent, AgentSession,
-    GraphSchema
+    GraphSchema,
+    ToolConfig
 } from './types';
 import * as env from 'dotenv'
+import { Agent } from "http";
+import { late } from "zod";
 env.config();
 
 // Define our State type
@@ -57,17 +60,21 @@ export class GraphBuilder {
 
     private async buildGraph(schema: GraphSchema): Promise<StateGraph<StateSchema>> {
         const graph = new StateGraph(this.StateSchema);
+        let allTools: ToolConfig[] = [];
 
         for (const node of schema.nodes) {
             if (node.type === 'agent') {
-
                 const agentNode = await this.buildAgentNode(node.id, node.config as AgentNodeConfig);
                 graph.addNode(node.id, agentNode);
-            } else if (node.type === 'tool') {
-                const toolNode = await this.buildToolNode(node.config as ToolNodeConfig);
-                graph.addNode(node.id, toolNode);
+                if (node.config.functions) {
+                    allTools.push(...node.config.functions)
+                }
             }
         }
+        let tools = this.buildTools(allTools)
+        let toolNode = new ToolNode(tools);
+        graph.addNode("tool_node", toolNode)
+
         console.log("[DEBUG] Nodes in the graph:");
         for (const node of schema.nodes) {
             console.log(`[DEBUG] Node ID: ${node.id}, Type: ${node.type}`);
@@ -105,14 +112,16 @@ export class GraphBuilder {
         return async (state: typeof this.StateSchema.State): Promise<Partial<typeof this.StateSchema.State>> => {
             const nodeModel = config.model ? new ChatOpenAI(config.model) : this.model;
             const tools = this.buildTools(config.functions || []);
+
             // Bind functions if available
             if (tools?.length) {
                 const functions = tools.map(tool => convertToOpenAIFunction(tool));
-                nodeModel.bind({ functions });
+                console.log(`[DEBUG] Binding functions to ${id}:`, functions.map(f => f.name));
+                nodeModel.bind({ functions });  // Force function calling
             }
 
             const prompt = ChatPromptTemplate.fromMessages([
-                ["system", config.systemPrompt],
+                ["system", config.systemPrompt + "\n\nWhen you need to execute an action, USE THE PROVIDED FUNCTIONS."],
                 new MessagesPlaceholder("messages"),
             ]);
 
@@ -125,14 +134,17 @@ export class GraphBuilder {
                 function_call: response.additional_kwargs?.function_call
             });
 
-            // If there's a function call, return with tool call info
+            // Check for function calls
             if (response.additional_kwargs?.function_call) {
+                const functionCall = response.additional_kwargs.function_call;
+                console.log(`[DEBUG] Function call detected:`, functionCall);
+
                 return {
                     messages: [response],
                     currentNode: id,
                     toolCalls: [{
-                        tool: response.additional_kwargs.function_call.name,
-                        args: JSON.parse(response.additional_kwargs.function_call.arguments)
+                        tool: functionCall.name,
+                        args: JSON.parse(functionCall.arguments)
                     }]
                 };
             }
@@ -144,23 +156,7 @@ export class GraphBuilder {
         };
     }
 
-    private async buildToolNode(config: ToolNodeConfig): Promise<ToolNode> {
-        const tool = new DynamicStructuredTool({
-            name: config.function,
-            description: config.description,
-            schema: config.schema,
-            func: async (input) => {
-                const result = await config.handler(input);
-                if (!result.success) {
-                    throw new Error(result.error || 'Tool execution failed');
-                }
-                return JSON.stringify(result.data);
-            }
-        });
-
-        return new ToolNode([tool]);
-    }
-    private buildTools(tools: ToolNodeConfig[]): DynamicStructuredTool[] {
+    private buildTools(tools: ToolConfig[]): DynamicStructuredTool[] {
         return tools.map(toolConfig => {
             return new DynamicStructuredTool({
                 name: toolConfig.function,
@@ -182,18 +178,18 @@ export class GraphBuilder {
             console.log('[DEBUG] State:', state);
             console.log('[DEBUG] Available routes:', condition.config);
 
-            const lastMessage = state.messages[state.messages.length - 1];
+            const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
             if (!lastMessage) return Object.keys(condition.config)[0];
 
-            // Handle tool calls
-            if (lastMessage.additional_kwargs?.function_call) {
-                const functionName = lastMessage.additional_kwargs.function_call.name;
-                console.log('[DEBUG] Found function call:', functionName);
-                return functionName in condition.config ? condition.config[functionName] : "__end__";
+            // If there is no function call, then we finish
+            if (lastMessage.tool_calls) {
+                console.log(`[DEBUG] Found Tool Call ${lastMessage.tool_calls}`);
+                return "tool_node";
             }
 
             // Handle routing commands
             if (lastMessage._getType() === 'ai') {
+
                 const content = lastMessage.content?.toString().toLowerCase().trim();
                 console.log(`[DEBUG] Found Content ${content}`);
 
@@ -201,12 +197,12 @@ export class GraphBuilder {
                 for (const [key, value] of Object.entries(condition.config)) {
                     if (content === key.toLowerCase()) {
                         console.log(`[DEBUG] Found route: ${key} -> ${value}`);
-                        return value;  // Return the value, not the key
+                        return key; // Return the value, not the key
                     }
                 }
             }
 
-            return "__end__";  // Match exact string in config
+            return "end";
         };
     }
 

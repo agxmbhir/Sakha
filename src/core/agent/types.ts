@@ -18,7 +18,7 @@ export interface ToolResult {
 }
 
 // Tool configuration 
-export interface ToolNodeConfig {
+export interface ToolConfig {
     function: string;
     description: string;
     schema: z.ZodObject<any>;
@@ -29,7 +29,7 @@ export interface ToolNodeConfig {
 export interface AgentNodeConfig {
     systemPrompt: string;
     model?: ChatModelConfig;
-    functions?: ToolNodeConfig[]; // Functions available to this agent
+    functions?: ToolConfig[]; // Functions available to this agent
 }
 
 // Edge configuration
@@ -46,7 +46,7 @@ export interface GraphEdge {
 export interface GraphNode {
     id: string;
     type: 'agent' | 'tool';
-    config: AgentNodeConfig | ToolNodeConfig;
+    config: AgentNodeConfig
 }
 
 // Main schema definition
