@@ -156,6 +156,17 @@ export const complexSchema: GraphSchema = {
             id: "alpha",
             type: 'agent',
             config: {
+                systemPrompt: `You are a customer service agent, if the user specifically asks for service, respond with "ROUTE", respond with ROUTE only 
+                   if it's an explicit service request. 
+                  if it is anything else respond directly. 
+                    ONLY respond with one of these exact words, nothing else.`,
+            }
+        },
+
+        {
+            id: "router",
+            type: 'agent',
+            config: {
                 systemPrompt: `You are a customer service router.
                     For refunds -> respond EXACTLY with "REFUND"
                     For invoices -> respond EXACTLY with "INVOICE"
@@ -170,9 +181,9 @@ export const complexSchema: GraphSchema = {
             type: 'agent',
             config: {
                 systemPrompt: `You are a billing specialist. You can help with refunds and order cancellations.
-            Available functions:
-            - cancel_order: Use to cancel an order (requires orderId and reason)
-            - process_refund: Use for refunds (requires orderId, amount, and reason)
+            Available functions that are bound to you.
+            - : Use to cancel an order (requires orderId and reason)
+            - : Use for refunds (requires orderId, amount, and reason)
             
             DO NOT describe function calls in text. Instead, USE the provided functions directly.
             Ask for any missing information before using functions.
@@ -210,6 +221,17 @@ export const complexSchema: GraphSchema = {
         { source: START, target: "alpha" },
         {
             source: "alpha",
+            condition: {
+                type: "router",
+                config: {
+                    "route": "router",
+                    "end": END
+                }
+            },
+            target: ""
+        },
+        {
+            source: "router",
             condition: {
                 type: "router",
                 config: {
@@ -259,7 +281,8 @@ export const complexSchema: GraphSchema = {
         },
         {
             source: 'tool_node',
-            target: END,
+            target: 'alpha',
+
         }
     ]
 };

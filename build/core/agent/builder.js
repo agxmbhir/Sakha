@@ -105,45 +105,138 @@ class GraphBuilder {
         }
         return graph;
     }
+    // private async buildAgentNode(id: string, config: AgentNodeConfig) {
+    //     return async (state: typeof this.StateSchema.State): Promise<Partial<typeof this.StateSchema.State>> => {
+    //         const nodeModel = config.model ? new ChatOpenAI(config.model) : this.model;
+    //         const tools = this.buildTools(config.functions || []);
+    //         if (tools?.length) {
+    //             const functions = tools.map(tool => convertToOpenAIFunction(tool));
+    //             console.log(`[DEBUG] Binding functions to ${id}:`, functions.map(f => f.name));
+    //             // Force the model to use function calling
+    //             nodeModel.bind({
+    //                 functions,
+    //                 function_call: { name: functions[0].name }
+    //             });
+    //             const enhancedPrompt = ChatPromptTemplate.fromMessages([
+    //                 ["system", `${config.systemPrompt}\n\n` +
+    //                     `You MUST use the provided functions via function calls.\n` +
+    //                     `Do not write out function calls as text.\n` +
+    //                     `Do not describe function calls.\n` +
+    //                     `Use the function calling API directly.\n`
+    //                 ],
+    //                 new MessagesPlaceholder("messages"),
+    //             ]);
+    //             const response = await enhancedPrompt.pipe(nodeModel).invoke({
+    //                 messages: state.messages
+    //             });
+    //             console.log(`[DEBUG] Agent ${id} response:`, {
+    //                 content: response.content,
+    //                 function_call: response.additional_kwargs?.function_call
+    //             });
+    //             // Check for function calls
+    //             if (response.additional_kwargs?.function_call) {
+    //                 const functionCall = response.additional_kwargs.function_call;
+    //                 return {
+    //                     messages: [response],
+    //                     currentNode: id,
+    //                     toolCalls: [{
+    //                         tool: functionCall.name,
+    //                         toolInput: JSON.parse(functionCall.arguments)
+    //                     }]
+    //                 };
+    //             }
+    //             return {
+    //                 messages: [response],
+    //                 currentNode: id
+    //             };
+    //         } else {
+    //             // Original logic for nodes without functions
+    //             const prompt = ChatPromptTemplate.fromMessages([
+    //                 ["system", config.systemPrompt],
+    //                 new MessagesPlaceholder("messages"),
+    //             ]);
+    //             const response = await prompt.pipe(nodeModel).invoke({
+    //                 messages: state.messages
+    //             });
+    //             return {
+    //                 messages: [response],
+    //                 currentNode: id
+    //             };
+    //         }
+    //     };
+    // }
     async buildAgentNode(id, config) {
         return async (state) => {
-            var _a, _b;
+            var _a;
             const nodeModel = config.model ? new openai_1.ChatOpenAI(config.model) : this.model;
             const tools = this.buildTools(config.functions || []);
-            // Bind functions if available
             if (tools === null || tools === void 0 ? void 0 : tools.length) {
+                console.log(`[DEBUG] Building agent node ${id} with ${tools.length} tools`);
+                console.log(`[DEBUG] Available tools:`, tools.map(t => ({
+                    name: t.name,
+                    schema: t.schema,
+                    description: t.description
+                })));
                 const functions = tools.map(tool => (0, function_calling_1.convertToOpenAIFunction)(tool));
-                console.log(`[DEBUG] Binding functions to ${id}:`, functions.map(f => f.name));
-                nodeModel.bind({ functions }); // Force function calling
-            }
-            const prompt = prompts_1.ChatPromptTemplate.fromMessages([
-                ["system", config.systemPrompt + "\n\nWhen you need to execute an action, USE THE PROVIDED FUNCTIONS."],
-                new prompts_2.MessagesPlaceholder("messages"),
-            ]);
-            const response = await prompt.pipe(nodeModel).invoke({
-                messages: state.messages
-            });
-            console.log(`[DEBUG] Agent ${id} response:`, {
-                content: response.content,
-                function_call: (_a = response.additional_kwargs) === null || _a === void 0 ? void 0 : _a.function_call
-            });
-            // Check for function calls
-            if ((_b = response.additional_kwargs) === null || _b === void 0 ? void 0 : _b.function_call) {
-                const functionCall = response.additional_kwargs.function_call;
-                console.log(`[DEBUG] Function call detected:`, functionCall);
+                console.log(`[DEBUG] Converted functions:`, functions.map(f => ({
+                    name: f.name,
+                    parameters: f.parameters,
+                    description: f.description
+                })));
+                // Force function calling for nodes with functions
+                const modelWithForcedFunctions = nodeModel.bind({
+                    functions: functions,
+                    // function_call: {
+                    //     name: functions[0].name
+                    // }
+                });
+                const enhancedPrompt = prompts_1.ChatPromptTemplate.fromMessages([
+                    ["system", `${config.systemPrompt || ""}\n\n` +
+                            `You MUST use the available functions to complete your task.\n` +
+                            `Use ONLY the functions provided.\n` +
+                            `Format outputs as specific function calls.\n` +
+                            `DO NOT provide explanations, just call the function.\n` +
+                            `Available functions: ${functions.map(f => f.name).join(', ')}\n`
+                    ],
+                    new prompts_2.MessagesPlaceholder("messages"),
+                ]);
+                console.log(`[DEBUG] Invoking model with messages:`, state.messages);
+                const response = await enhancedPrompt.pipe(modelWithForcedFunctions).invoke({
+                    messages: state.messages
+                });
+                // Check for function calls
+                if ((_a = response.additional_kwargs) === null || _a === void 0 ? void 0 : _a.function_call) {
+                    const functionCall = response.additional_kwargs.function_call;
+                    return {
+                        messages: [response],
+                        currentNode: id,
+                        toolCalls: [{
+                                tool: functionCall.name,
+                                toolInput: JSON.parse(functionCall.arguments)
+                            }]
+                    };
+                }
+                console.log(`[DEBUG] No tool calls found in response, returning regular message`);
                 return {
                     messages: [response],
-                    currentNode: id,
-                    toolCalls: [{
-                            tool: functionCall.name,
-                            args: JSON.parse(functionCall.arguments)
-                        }]
+                    currentNode: id
                 };
             }
-            return {
-                messages: [response],
-                currentNode: id
-            };
+            else {
+                console.log(`[DEBUG] Node ${id} has no tools configured`);
+                // For nodes without functions, use original prompt
+                const prompt = prompts_1.ChatPromptTemplate.fromMessages([
+                    ["system", config.systemPrompt || ""],
+                    new prompts_2.MessagesPlaceholder("messages"),
+                ]);
+                const response = await prompt.pipe(nodeModel).invoke({
+                    messages: state.messages
+                });
+                return {
+                    messages: [response],
+                    currentNode: id
+                };
+            }
         };
     }
     buildTools(tools) {
@@ -164,28 +257,27 @@ class GraphBuilder {
     }
     async buildConditional(condition) {
         return async (state) => {
-            var _a, _b;
+            var _a;
             console.log('[DEBUG] Evaluating conditional routing');
             console.log('[DEBUG] State:', state);
             console.log('[DEBUG] Available routes:', condition.config);
             const lastMessage = state.messages[state.messages.length - 1];
             if (!lastMessage)
                 return Object.keys(condition.config)[0];
-            // Handle tool calls
-            if ((_a = lastMessage.additional_kwargs) === null || _a === void 0 ? void 0 : _a.function_call) {
-                const functionName = lastMessage.additional_kwargs.function_call.name;
-                console.log('[DEBUG] Found function call:', functionName);
-                return 'tool_node';
+            // Check for tool calls in the state
+            if (state.toolCalls && state.toolCalls.length > 0) {
+                console.log(`[DEBUG] Found Tool Calls, routing to tool_node:`, state.toolCalls);
+                return "tool_node";
             }
             // Handle routing commands
             if (lastMessage._getType() === 'ai') {
-                const content = (_b = lastMessage.content) === null || _b === void 0 ? void 0 : _b.toString().toLowerCase().trim();
+                const content = (_a = lastMessage.content) === null || _a === void 0 ? void 0 : _a.toString().toLowerCase().trim();
                 console.log(`[DEBUG] Found Content ${content}`);
                 // Find matching route ignoring case
                 for (const [key, value] of Object.entries(condition.config)) {
                     if (content === key.toLowerCase()) {
                         console.log(`[DEBUG] Found route: ${key} -> ${value}`);
-                        return key; // Return the value, not the key
+                        return key.toLowerCase(); // Return the value, not the key
                     }
                 }
             }
@@ -244,7 +336,7 @@ class GraphBuilder {
             console.debug("[DEBUG] Current State Values:", currentState);
             const result = await agent.graph.invoke({
                 messages: [...((currentState === null || currentState === void 0 ? void 0 : currentState.messages) || []), new messages_1.HumanMessage(message)],
-                currentNode: (currentState === null || currentState === void 0 ? void 0 : currentState.currentNode) || 'alpha',
+                currentNode: currentState === null || currentState === void 0 ? void 0 : currentState.currentNode,
                 toolCalls: (currentState === null || currentState === void 0 ? void 0 : currentState.toolCalls) || []
             }, config // Pass the same config here
             );
