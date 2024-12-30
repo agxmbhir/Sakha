@@ -31,7 +31,7 @@ export const StateSchemaDefinition = {
         reducer: (x: BaseMessage[], y: BaseMessage[] | undefined) => y ? x.concat(y) : x
     }),
     currentNode: Annotation<string>({
-        default: () => "alpha",
+        default: () => 'alpha',
         reducer: (x: string, y: string | undefined) => y ?? x ?? "alpha"
     }),
     toolCalls: Annotation<Record<string, any>[]>({
@@ -197,12 +197,7 @@ export class GraphBuilder {
                 })));
 
                 // Force function calling for nodes with functions
-                const modelWithForcedFunctions = nodeModel.bind({
-                    functions: functions,
-                    // function_call: {
-                    //     name: functions[0].name
-                    // }
-                });
+                const modelWithForcedFunctions = nodeModel.bindTools(tools);
 
                 const enhancedPrompt = ChatPromptTemplate.fromMessages([
                     ["system", `${config.systemPrompt || ""}\n\n` +
@@ -215,21 +210,18 @@ export class GraphBuilder {
                     new MessagesPlaceholder("messages"),
                 ]);
 
-                console.log(`[DEBUG] Invoking model with messages:`, state.messages);
+                console.log(`[DEBUG] Invoking model with new message:`, state.messages[state.messages.length - 1]);
                 const response = await enhancedPrompt.pipe(modelWithForcedFunctions).invoke({
                     messages: state.messages
                 });
 
                 // Check for function calls
-                if (response.additional_kwargs?.function_call) {
-                    const functionCall = response.additional_kwargs.function_call;
+                if (response.additional_kwargs?.tool_calls) {
+                    const toolCalls = response.additional_kwargs.tool_calls;
                     return {
                         messages: [response],
                         currentNode: id,
-                        toolCalls: [{
-                            tool: functionCall.name,
-                            toolInput: JSON.parse(functionCall.arguments)
-                        }]
+                        toolCalls: toolCalls
                     };
                 }
 
@@ -279,15 +271,16 @@ export class GraphBuilder {
     private async buildConditional(condition: { type: 'router', config: Record<string, string> }) {
         return async (state: typeof this.StateSchema.State): Promise<string> => {
             console.log('[DEBUG] Evaluating conditional routing');
-            console.log('[DEBUG] State:', state);
+            console.log('[DEBUG] Current Node State:', state.currentNode);
             console.log('[DEBUG] Available routes:', condition.config);
+
 
             const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
             if (!lastMessage) return Object.keys(condition.config)[0];
 
             // Check for tool calls in the state
-            if (state.toolCalls && state.toolCalls.length > 0) {
-                console.log(`[DEBUG] Found Tool Calls, routing to tool_node:`, state.toolCalls);
+            if (lastMessage.additional_kwargs.tool_calls) {
+                console.log(`[DEBUG] Found Tool Calls, routing to tool_node:`,);
                 return "tool_node";
             }
 
@@ -364,15 +357,19 @@ export class GraphBuilder {
             };
 
             const currentState = (await agent.graph.getState(config)).values;
-            console.debug("[DEBUG] Current State Values:", currentState);
+            let currentStateExists = currentState ? true : false;
+            console.log(`[DEBUG] Does the currentState exist ${currentStateExists}`)
+            console.debug("[DEBUG] Current State Values:", currentState?.currentNode);
+            console.log("Finding the current state values.")
             const result = await agent.graph.invoke(
                 {
                     messages: [...(currentState?.messages || []), new HumanMessage(message)],
-                    currentNode: currentState?.currentNode,
+                    currentNode: currentState?.currentNode || 'alpha',
                     toolCalls: currentState?.toolCalls || []
                 },
                 config  // Pass the same config here
             );
+
 
             // Update session state
             if (session.state.path) {

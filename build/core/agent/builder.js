@@ -42,7 +42,7 @@ exports.StateSchemaDefinition = {
         reducer: (x, y) => y ? x.concat(y) : x
     }),
     currentNode: (0, langgraph_2.Annotation)({
-        default: () => "alpha",
+        default: () => 'alpha',
         reducer: (x, y) => { var _a; return (_a = y !== null && y !== void 0 ? y : x) !== null && _a !== void 0 ? _a : "alpha"; }
     }),
     toolCalls: (0, langgraph_2.Annotation)({
@@ -184,12 +184,7 @@ class GraphBuilder {
                     description: f.description
                 })));
                 // Force function calling for nodes with functions
-                const modelWithForcedFunctions = nodeModel.bind({
-                    functions: functions,
-                    // function_call: {
-                    //     name: functions[0].name
-                    // }
-                });
+                const modelWithForcedFunctions = nodeModel.bindTools(tools);
                 const enhancedPrompt = prompts_1.ChatPromptTemplate.fromMessages([
                     ["system", `${config.systemPrompt || ""}\n\n` +
                             `You MUST use the available functions to complete your task.\n` +
@@ -200,20 +195,17 @@ class GraphBuilder {
                     ],
                     new prompts_2.MessagesPlaceholder("messages"),
                 ]);
-                console.log(`[DEBUG] Invoking model with messages:`, state.messages);
+                console.log(`[DEBUG] Invoking model with new message:`, state.messages[state.messages.length - 1]);
                 const response = await enhancedPrompt.pipe(modelWithForcedFunctions).invoke({
                     messages: state.messages
                 });
                 // Check for function calls
-                if ((_a = response.additional_kwargs) === null || _a === void 0 ? void 0 : _a.function_call) {
-                    const functionCall = response.additional_kwargs.function_call;
+                if ((_a = response.additional_kwargs) === null || _a === void 0 ? void 0 : _a.tool_calls) {
+                    const toolCalls = response.additional_kwargs.tool_calls;
                     return {
                         messages: [response],
                         currentNode: id,
-                        toolCalls: [{
-                                tool: functionCall.name,
-                                toolInput: JSON.parse(functionCall.arguments)
-                            }]
+                        toolCalls: toolCalls
                     };
                 }
                 console.log(`[DEBUG] No tool calls found in response, returning regular message`);
@@ -259,14 +251,14 @@ class GraphBuilder {
         return async (state) => {
             var _a;
             console.log('[DEBUG] Evaluating conditional routing');
-            console.log('[DEBUG] State:', state);
+            console.log('[DEBUG] Current Node State:', state.currentNode);
             console.log('[DEBUG] Available routes:', condition.config);
             const lastMessage = state.messages[state.messages.length - 1];
             if (!lastMessage)
                 return Object.keys(condition.config)[0];
             // Check for tool calls in the state
-            if (state.toolCalls && state.toolCalls.length > 0) {
-                console.log(`[DEBUG] Found Tool Calls, routing to tool_node:`, state.toolCalls);
+            if (lastMessage.additional_kwargs.tool_calls) {
+                console.log(`[DEBUG] Found Tool Calls, routing to tool_node:`);
                 return "tool_node";
             }
             // Handle routing commands
@@ -333,10 +325,13 @@ class GraphBuilder {
                 }
             };
             const currentState = (await agent.graph.getState(config)).values;
-            console.debug("[DEBUG] Current State Values:", currentState);
+            let currentStateExists = currentState ? true : false;
+            console.log(`[DEBUG] Does the currentState exist ${currentStateExists}`);
+            console.debug("[DEBUG] Current State Values:", currentState === null || currentState === void 0 ? void 0 : currentState.currentNode);
+            console.log("Finding the current state values.");
             const result = await agent.graph.invoke({
                 messages: [...((currentState === null || currentState === void 0 ? void 0 : currentState.messages) || []), new messages_1.HumanMessage(message)],
-                currentNode: currentState === null || currentState === void 0 ? void 0 : currentState.currentNode,
+                currentNode: (currentState === null || currentState === void 0 ? void 0 : currentState.currentNode) || 'alpha',
                 toolCalls: (currentState === null || currentState === void 0 ? void 0 : currentState.toolCalls) || []
             }, config // Pass the same config here
             );

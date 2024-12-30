@@ -157,12 +157,18 @@ export const complexSchema: GraphSchema = {
             type: 'agent',
             config: {
                 systemPrompt: `You are a customer service agent, if the user specifically asks for service, respond with "ROUTE", respond with ROUTE only 
-                   if it's an explicit service request. 
+                   if it's an explicit service request, return 
                   if it is anything else respond directly. 
                     ONLY respond with one of these exact words, nothing else.`,
             }
         },
-
+        {
+            id: 'beta',
+            type: 'agent',
+            config: {
+                systemPrompt: `You are a customer service agent which makes sure the user is satisfied with the serfice.   ONLY respond with one of these exact words, nothing else.`,
+            }
+        },
         {
             id: "router",
             type: 'agent',
@@ -281,7 +287,12 @@ export const complexSchema: GraphSchema = {
         },
         {
             source: 'tool_node',
-            target: 'alpha',
+            target: 'beta',
+
+        },
+        {
+            source: 'beta',
+            target: END,
 
         }
     ]
