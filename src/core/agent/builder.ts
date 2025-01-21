@@ -106,76 +106,6 @@ export class GraphBuilder {
         return graph;
     }
 
-    // private async buildAgentNode(id: string, config: AgentNodeConfig) {
-    //     return async (state: typeof this.StateSchema.State): Promise<Partial<typeof this.StateSchema.State>> => {
-    //         const nodeModel = config.model ? new ChatOpenAI(config.model) : this.model;
-    //         const tools = this.buildTools(config.functions || []);
-
-    //         if (tools?.length) {
-    //             const functions = tools.map(tool => convertToOpenAIFunction(tool));
-    //             console.log(`[DEBUG] Binding functions to ${id}:`, functions.map(f => f.name));
-
-    //             // Force the model to use function calling
-    //             nodeModel.bind({
-    //                 functions,
-    //                 function_call: { name: functions[0].name }
-    //             });
-
-    //             const enhancedPrompt = ChatPromptTemplate.fromMessages([
-    //                 ["system", `${config.systemPrompt}\n\n` +
-    //                     `You MUST use the provided functions via function calls.\n` +
-    //                     `Do not write out function calls as text.\n` +
-    //                     `Do not describe function calls.\n` +
-    //                     `Use the function calling API directly.\n`
-    //                 ],
-    //                 new MessagesPlaceholder("messages"),
-    //             ]);
-
-    //             const response = await enhancedPrompt.pipe(nodeModel).invoke({
-    //                 messages: state.messages
-    //             });
-
-    //             console.log(`[DEBUG] Agent ${id} response:`, {
-    //                 content: response.content,
-    //                 function_call: response.additional_kwargs?.function_call
-    //             });
-
-    //             // Check for function calls
-    //             if (response.additional_kwargs?.function_call) {
-    //                 const functionCall = response.additional_kwargs.function_call;
-    //                 return {
-    //                     messages: [response],
-    //                     currentNode: id,
-    //                     toolCalls: [{
-    //                         tool: functionCall.name,
-    //                         toolInput: JSON.parse(functionCall.arguments)
-    //                     }]
-    //                 };
-    //             }
-
-    //             return {
-    //                 messages: [response],
-    //                 currentNode: id
-    //             };
-    //         } else {
-    //             // Original logic for nodes without functions
-    //             const prompt = ChatPromptTemplate.fromMessages([
-    //                 ["system", config.systemPrompt],
-    //                 new MessagesPlaceholder("messages"),
-    //             ]);
-
-    //             const response = await prompt.pipe(nodeModel).invoke({
-    //                 messages: state.messages
-    //             });
-
-    //             return {
-    //                 messages: [response],
-    //                 currentNode: id
-    //             };
-    //         }
-    //     };
-    // }
-
     private async buildAgentNode(id: string, config: AgentNodeConfig) {
         return async (state: typeof this.StateSchema.State): Promise<Partial<typeof this.StateSchema.State>> => {
             const nodeModel = config.model ? new ChatOpenAI(config.model) : this.model;
@@ -268,6 +198,8 @@ export class GraphBuilder {
             });
         });
     }
+
+
     private async buildConditional(condition: { type: 'router', config: Record<string, string> }) {
         return async (state: typeof this.StateSchema.State): Promise<string> => {
             console.log('[DEBUG] Evaluating conditional routing');
